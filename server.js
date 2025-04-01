@@ -84,6 +84,45 @@ app.get("/emissions/total/:year/:month", async (req, res) => {
     res.json({ year, month, total_emission: totalEmission, unit: "kg CO2" });
 });
 
+// Emisi per Kampus
+app.get("/emissions/campus", async (req, res) => {
+    const { campus, year } = req.query;
+    
+    let query = supabase
+        .from("device_usage")
+        .select("usage_hours, year, month, devices(device_power, rooms(buildings(campuses(campus_name))))");
+
+    // Filter berdasarkan kampus (jika diberikan)
+    if (campus) {
+        query = query.eq("devices.rooms.buildings.campuses.campus_name", campus);
+    }
+
+    // Filter berdasarkan tahun (jika diberikan)
+    if (year) {
+        query = query.eq("year", year);
+    }
+
+    const { data, error } = await query;
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    let emissionsData = {};
+
+    data.forEach((usage) => {
+        const campusName = usage.devices.rooms.buildings.campuses.campus_name;
+        const emission = usage.devices.device_power * usage.usage_hours * 0.0004;
+        const dataKey = year ? usage.month : usage.year; // Gunakan bulan jika year disertakan, gunakan tahun jika tidak.
+
+        if (!emissionsData[campusName]) emissionsData[campusName] = {};
+        emissionsData[campusName][dataKey] = (emissionsData[campusName][dataKey] || 0) + emission;
+    });
+
+    res.json({
+        filter: { campus: campus || "All", year: year || "All" },
+        emissions: emissionsData,
+    });
+});
+
 // Emisi Per Gedung
 app.get("/emissions/building/:year/:month", async (req, res) => {
     const { year, month } = req.params;
