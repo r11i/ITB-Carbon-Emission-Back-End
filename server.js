@@ -84,44 +84,110 @@ app.get("/emissions/total/:year/:month", async (req, res) => {
     res.json({ year, month, total_emission: totalEmission, unit: "kg CO2" });
 });
 
+async function fetchAllEmissions() {
+    let allData = [];
+    let page = 0;
+    const pageSize = 1000;
+    let done = false;
+  
+    while (!done) {
+      const { data, error } = await supabase
+        .from("emissions_view")
+        .select("*")
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+  
+      if (error) throw new Error(error.message);
+  
+      allData.push(...data);
+      if (data.length < pageSize) {
+        done = true;
+      } else {
+        page++;
+      }
+    }
+  
+    return allData;
+  }
+
 // Emisi per Kampus
 app.get("/emissions/campus", async (req, res) => {
-    const { campus, year } = req.query;
-    
-    let query = supabase
-        .from("device_usage")
-        .select("usage_hours, year, month, devices(device_power, rooms(buildings(campuses(campus_name))))");
-
-    // Filter berdasarkan kampus (jika diberikan)
-    if (campus) {
-        query = query.eq("devices.rooms.buildings.campuses.campus_name", campus);
-    }
-
-    // Filter berdasarkan tahun (jika diberikan)
-    if (year) {
-        query = query.eq("year", year);
-    }
-
-    const { data, error } = await query;
-
-    if (error) return res.status(400).json({ error: error.message });
-
-    let emissionsData = {};
-
-    data.forEach((usage) => {
-        const campusName = usage.devices.rooms.buildings.campuses.campus_name;
-        const emission = usage.devices.device_power * usage.usage_hours * 0.0004;
-        const dataKey = year ? usage.month : usage.year; // Gunakan bulan jika year disertakan, gunakan tahun jika tidak.
-
+    let { campus = "All", year = "All" } = req.query;
+  
+    try {
+      const pageSize = 1000;
+      let allData = [];
+      let page = 0;
+      let done = false;
+  
+      // Pagination loop
+      while (!done) {
+        let query = supabase
+          .from("emissions_view")
+          .select("*")
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+  
+        // Apply filters (only in the paged query)
+        if (campus !== "All") {
+          query = query.ilike("campus_name", campus);
+        }
+  
+        if (year !== "All") {
+          query = query.eq("year", parseInt(year));
+        }
+  
+        const { data, error } = await query;
+  
+        if (error) {
+          console.error("Supabase error:", error.message);
+          return res.status(500).json({ error: error.message });
+        }
+  
+        allData.push(...data);
+        if (data.length < pageSize) {
+          done = true;
+        } else {
+          page++;
+        }
+      }
+  
+      console.log("Total rows fetched:", allData.length);
+  
+      // Process emissions data
+      let emissionsData = {};
+  
+      allData.forEach((usage) => {
+        const campusName = usage.campus_name;
+        const emission = usage.device_power * usage.usage_hours * 0.0004;
+        const yearKey = usage.year;
+        const monthKey = usage.month;
+  
         if (!emissionsData[campusName]) emissionsData[campusName] = {};
-        emissionsData[campusName][dataKey] = (emissionsData[campusName][dataKey] || 0) + emission;
-    });
-
-    res.json({
-        filter: { campus: campus || "All", year: year || "All" },
+  
+        if (campus !== "All" && year !== "All") {
+          emissionsData[campusName][monthKey] = (emissionsData[campusName][monthKey] || 0) + emission;
+        } else if (campus !== "All" && year === "All") {
+          emissionsData[campusName][yearKey] = (emissionsData[campusName][yearKey] || 0) + emission;
+        } else if (campus === "All" && year !== "All") {
+          emissionsData[campusName][monthKey] = (emissionsData[campusName][monthKey] || 0) + emission;
+        } else {
+          emissionsData[campusName][yearKey] = (emissionsData[campusName][yearKey] || 0) + emission;
+        }
+      });
+  
+      res.json({
+        filter: { campus, year },
         emissions: emissionsData,
-    });
-});
+      });
+    } catch (err) {
+      console.error("Server error:", err.message);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+  
+  
+  
+  
+
 
 // Emisi Per Gedung
 app.get("/emissions/building/:year/:month", async (req, res) => {
