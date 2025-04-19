@@ -46,7 +46,7 @@ app.post("/users/login", async (req, res) => {
 app.post("/devices", async (req, res) => {
     const { device_name, device_power, room_id } = req.body;
     const { data, error } = await supabase
-        .from("devices")
+        .from("Devices")
         .insert([{ device_name, device_power, room_id }])
         .select();
     if (error) return res.status(400).json({ error: error.message });
@@ -64,25 +64,6 @@ app.delete("/devices/:device_id", async (req, res) => {
 /**
  * 3️⃣ EMISSION CALCULATIONS
  */
-
-// Total Emisi Karbon
-app.get("/emissions/total/:year/:month", async (req, res) => {
-    const { year, month } = req.params;
-    const { data, error } = await supabase
-        .from("device_usage")
-        .select("usage_hours, devices(device_power)")
-        .eq("year", year)
-        .eq("month", month);
-
-    if (error) return res.status(400).json({ error: error.message });
-
-    let totalEmission = 0;
-    data.forEach((usage) => {
-        totalEmission += usage.devices.device_power * usage.usage_hours * 0.0004;
-    });
-
-    res.json({ year, month, total_emission: totalEmission, unit: "kg CO2" });
-});
 
 async function fetchAllEmissions() {
     let allData = [];
@@ -315,32 +296,61 @@ app.get("/emissions/device", async (req, res) => {
 
 // Simpan Data Penggunaan Perangkat
 app.post("/device_usage", async (req, res) => {
-    const { device_id, year, month, usage_hours } = req.body;
-    const { data, error } = await supabase
-        .from("device_usage")
-        .insert([{ device_id, year, month, usage_hours }])
-        .select();
+  const { device_id, year, month, usage_hours } = req.body;
+  console.log("Received body:", req.body);
 
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ message: "Data penggunaan berhasil disimpan", data });
+  const { data, error } = await supabase
+    .from("Device_usage")
+    .insert([{ device_id, year, month, usage_hours }])
+    .select();
+
+  console.log("Insert result:", data);
+  console.log("Insert error:", error);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Data penggunaan berhasil disimpan", data });
 });
 
-/**
- * 5️⃣ FILTER EMISSION DATA
- */
 
-// Filter Periode Penggunaan Perangkat
-app.get("/emissions/filter", async (req, res) => {
-    const { year, month } = req.query;
+// Get Kampus
+app.get("/campuses", async (req, res) => {
+  try {
     const { data, error } = await supabase
-        .from("device_usage")
-        .select("*")
-        .eq("year", year)
-        .eq("month", month);
+      .from("Campuses")
+      .select("campus_name");
 
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ year, month, usage_data: data });
+    if (error) {
+      console.error("Supabase error:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ campuses: data });
+  } catch (err) {
+    console.error("Server error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
 });
+
+// Get Building
+app.get("/buildings", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("Buildings")
+      .select("building_name");
+
+    if (error) {
+      console.error("Supabase error:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ buildings: data });
+  } catch (err) {
+    console.error("Server error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 
 // Jalankan Server
 app.listen(PORT, () => {
