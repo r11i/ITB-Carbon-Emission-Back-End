@@ -244,80 +244,32 @@ app.post("/emissions/device_input", async (req, res) => { // Path diubah sesuai 
     }
 });
 
-// --- Helper untuk Fetch Semua Data dengan Pagination ---
-// (Digunakan oleh endpoint emisi agregat di bawah)
-async function fetchAllPaginatedData(viewName, filter = {}) {
-    let allData = [];
-    let page = 0;
-    const pageSize = 1000; // Ukuran batch fetch Supabase
-    let done = false;
-    console.log(`Fetching all data from ${viewName} with filter:`, filter);
-
-    while (!done) {
-        const from = page * pageSize;
-        const to = from + pageSize - 1;
-        let query = supabase.from(viewName).select("*").range(from, to);
-
-        // Terapkan filter (contoh: campus, year)
-        if (filter.campus && filter.campus !== "All") {
-            query = query.ilike("campus_name", `%${filter.campus}%`); // Gunakan ilike untuk case-insensitive
-        }
-        if (filter.year && filter.year !== "All") {
-            query = query.eq("year", parseInt(filter.year));
-        }
-        // Tambahkan filter lain jika perlu
-
-        const { data, error, count } = await query;
-
-        if (error) {
-            console.error(`Supabase error fetching page ${page} from ${viewName}:`, error.message);
-            throw new Error(`Database error fetching ${viewName}: ${error.message}`);
-        }
-
-        // console.log(`Fetched page ${page} from ${viewName}: ${data?.length} rows`);
-        if (data && data.length > 0) {
-            allData = allData.concat(data);
-        }
-
-        if (!data || data.length < pageSize) {
-            done = true; // Berhenti jika data yg diambil lebih sedikit dari page size
-        } else {
-            page++;
-        }
-    }
-    console.log(`Total rows fetched from ${viewName}: ${allData.length}`);
-    return allData;
-}
-
-
-// Emisi per Kampus (Menggunakan helper fetchAll)
 app.get("/emissions/campus", async (req, res) => {
     let { campus = "All", year = "All" } = req.query;
 
     try {
-        // Pastikan view 'emissions_view' ada dan kolomnya benar
-        // View ini idealnya join: Device_usage -> Devices -> Rooms -> Buildings -> Campuses
-        const allData = await fetchAllPaginatedData("emissions_view", { campus, year });
+        // Query pre-aggregated emissions
+        let query = supabase.from("aggregated_emissions_by_campus").select("*");
 
-        let emissionsByCampus = {}; // { campusName: { year/month: emission } }
-        let totalEmissionsByCampus = {}; // { campusName: totalEmission }
+        // Apply filters if not "All"
+        if (campus !== "All") query = query.eq("campus_name", campus);
+        if (year !== "All") query = query.eq("year", parseInt(year));
 
-        const emissionFactor = 0.4; // Faktor emisi (kg CO2e / kWh)
+        const { data: aggregatedData, error } = await query;
 
-        allData.forEach((usage) => {
-            // Pastikan kolom ada di view
-            if (!usage.campus_name || usage.device_power == null || usage.usage_hours == null || !usage.year || !usage.month) {
-                console.warn("Skipping incomplete data from emissions_view:", usage);
-                return;
-            }
+        if (error) throw new Error(error.message);
 
-            const campusName = usage.campus_name;
-            const kwh = usage.device_power * usage.usage_hours / 1000;
-            const emission = kwh * emissionFactor;
-            const yearKey = usage.year;
-            const monthKey = usage.month;
+        // Restructure the data
+        const emissionsByCampus = {};
+        const totalEmissionsByCampus = {};
 
-            // Inisialisasi jika belum ada
+        aggregatedData.forEach(row => {
+            const campusName = row.campus_name;
+            const yearKey = row.year;
+            const monthKey = row.month;
+            const emission = parseFloat(row.emission);
+
+            // Init structure
             if (!emissionsByCampus[campusName]) {
                 emissionsByCampus[campusName] = {};
                 totalEmissionsByCampus[campusName] = 0;
@@ -325,31 +277,30 @@ app.get("/emissions/campus", async (req, res) => {
 
             totalEmissionsByCampus[campusName] += emission;
 
-            // Agregasi berdasarkan filter
+            // Aggregation key logic
             let aggregationKey;
-            if (year !== "All" && campus !== "All") aggregationKey = monthKey; // Detail per bulan jika tahun & kampus spesifik
-            else if (year !== "All" && campus === "All") aggregationKey = monthKey; // Detail per bulan jika tahun spesifik
-            else aggregationKey = yearKey; // Agregat per tahun jika tahun 'All' atau kampus 'All'
+            if (year !== "All" && campus !== "All") aggregationKey = monthKey;
+            else if (year !== "All" && campus === "All") aggregationKey = monthKey;
+            else aggregationKey = yearKey;
 
-            emissionsByCampus[campusName][aggregationKey] = (emissionsByCampus[campusName][aggregationKey] || 0) + emission;
-
+            emissionsByCampus[campusName][aggregationKey] = 
+                (emissionsByCampus[campusName][aggregationKey] || 0) + emission;
         });
 
-        // Bulatkan hasil total
+        // Round results
         for (const camp in totalEmissionsByCampus) {
             totalEmissionsByCampus[camp] = parseFloat(totalEmissionsByCampus[camp].toFixed(3));
         }
-         // Bulatkan hasil agregasi per bulan/tahun
-         for (const camp in emissionsByCampus) {
-             for (const key in emissionsByCampus[camp]) {
-                 emissionsByCampus[camp][key] = parseFloat(emissionsByCampus[camp][key].toFixed(3));
-             }
-         }
+        for (const camp in emissionsByCampus) {
+            for (const key in emissionsByCampus[camp]) {
+                emissionsByCampus[camp][key] = parseFloat(emissionsByCampus[camp][key].toFixed(3));
+            }
+        }
 
         res.json({
             filter: { campus, year },
-            emissions: emissionsByCampus, // Data agregat per kampus (per bulan/tahun)
-            total_emissions: totalEmissionsByCampus, // Total emisi per kampus utk periode filter
+            emissions: emissionsByCampus,
+            total_emissions: totalEmissionsByCampus,
         });
     } catch (err) {
         console.error("Server error fetching campus emissions:", err.message);
@@ -357,89 +308,92 @@ app.get("/emissions/campus", async (req, res) => {
     }
 });
 
-// Emisi per gedung (Menggunakan helper fetchAll)
 app.get("/emissions/building", async (req, res) => {
     let { campus = "All", year = "All" } = req.query;
 
     try {
-         // Pastikan view 'building_emissions_view' ada
-         const allData = await fetchAllPaginatedData("building_emissions_view", { campus, year });
+        let query = supabase.from("aggregated_emissions_by_building_and_room").select("*");
 
-         let emissionsByBuilding = {}; // { buildingName: { total_emission: X, rooms: { roomName: Y } } }
-         const emissionFactor = 0.4;
+        if (campus !== "All") query = query.eq("campus_name", campus);
+        if (year !== "All") query = query.eq("year", parseInt(year));
 
-         allData.forEach((row) => {
-             if (!row.building_name || !row.room_name || row.device_power == null || row.usage_hours == null) {
-                 console.warn("Skipping incomplete data from building_emissions_view:", row);
-                 return;
-             }
-             const { building_name, room_name, device_power, usage_hours } = row;
-             const kwh = device_power * usage_hours / 1000;
-             const emission = kwh * emissionFactor;
+        const { data, error } = await query;
+        if (error) throw new Error(error.message);
 
-             if (!emissionsByBuilding[building_name]) {
-                 emissionsByBuilding[building_name] = { total_emission: 0, rooms: {} };
-             }
-             emissionsByBuilding[building_name].total_emission += emission;
+        let emissionsByBuilding = {}; // { buildingName: { total_emission, rooms: { roomName: emission } } }
 
-             if (!emissionsByBuilding[building_name].rooms[room_name]) {
-                 emissionsByBuilding[building_name].rooms[room_name] = 0;
-             }
-             emissionsByBuilding[building_name].rooms[room_name] += emission;
-         });
+        data.forEach(row => {
+            const { building_name, room_name, emission } = row;
+            if (!building_name || !room_name || emission == null) {
+                console.warn("Skipping incomplete data:", row);
+                return;
+            }
 
-          // Bulatkan hasil
-         for (const building in emissionsByBuilding) {
-             emissionsByBuilding[building].total_emission = parseFloat(emissionsByBuilding[building].total_emission.toFixed(3));
-             for (const room in emissionsByBuilding[building].rooms) {
-                 emissionsByBuilding[building].rooms[room] = parseFloat(emissionsByBuilding[building].rooms[room].toFixed(3));
-             }
-         }
+            if (!emissionsByBuilding[building_name]) {
+                emissionsByBuilding[building_name] = { total_emission: 0, rooms: {} };
+            }
 
+            emissionsByBuilding[building_name].total_emission += emission;
+            emissionsByBuilding[building_name].rooms[room_name] =
+                (emissionsByBuilding[building_name].rooms[room_name] || 0) + emission;
+        });
 
-         res.json({
-             filter: { campus, year },
-             buildings: emissionsByBuilding,
-         });
+        // Round values
+        for (const building in emissionsByBuilding) {
+            emissionsByBuilding[building].total_emission =
+                parseFloat(emissionsByBuilding[building].total_emission.toFixed(3));
+            for (const room in emissionsByBuilding[building].rooms) {
+                emissionsByBuilding[building].rooms[room] =
+                    parseFloat(emissionsByBuilding[building].rooms[room].toFixed(3));
+            }
+        }
+
+        res.json({
+            filter: { campus, year },
+            buildings: emissionsByBuilding,
+        });
+
     } catch (err) {
         console.error("Server error fetching building emissions:", err.message);
         res.status(500).json({ error: err.message || "Server error" });
     }
 });
 
-// Emisi per device (nama device) (Menggunakan helper fetchAll)
+
 app.get("/emissions/device", async (req, res) => {
-    let { campus = "All", year = "All" } = req.query; // Frontend mengirim year saja saat ini
+    let { campus = "All", year = "All" } = req.query;
 
     try {
-        // Pastikan view 'device_emissions_view' ada
-        const allData = await fetchAllPaginatedData("device_emissions_view", { campus, year });
+        let query = supabase.from("aggregated_emissions_by_device").select("*");
 
-        let emissionsByDeviceName = {}; // { deviceName: total_kWh } - asumsi frontend perlu kWh
-        // const emissionFactor = 0.4; // Tidak dipakai jika frontend perlu kWh
+        if (campus !== "All") query = query.eq("campus_name", campus);
+        if (year !== "All") query = query.eq("year", parseInt(year));
 
-        allData.forEach((row) => {
-             if (!row.device_name || row.device_power == null || row.usage_hours == null) {
-                 console.warn("Skipping incomplete data from device_emissions_view:", row);
-                 return;
-             }
-            const { device_name, device_power, usage_hours } = row;
-            const kwh = device_power * usage_hours / 1000;
-            // const emission = kwh * emissionFactor; // Hitung emisi jika perlu
+        const { data, error } = await query;
 
-            emissionsByDeviceName[device_name] = (emissionsByDeviceName[device_name] || 0) + kwh; // Akumulasi kWh
+        if (error) throw new Error(error.message);
+
+        const emissionsByDeviceName = {};
+
+        data.forEach(row => {
+            const { device_name, total_emission } = row;
+            if (!device_name || total_emission == null) {
+                console.warn("Skipping invalid row:", row);
+                return;
+            }
+
+            emissionsByDeviceName[device_name] = 
+                (emissionsByDeviceName[device_name] || 0) + parseFloat(total_emission);
         });
 
-         // Bulatkan hasil
-        for (const deviceName in emissionsByDeviceName) {
-            emissionsByDeviceName[deviceName] = parseFloat(emissionsByDeviceName[deviceName].toFixed(3));
+        // Round results
+        for (const device in emissionsByDeviceName) {
+            emissionsByDeviceName[device] = parseFloat(emissionsByDeviceName[device].toFixed(3));
         }
-
 
         res.json({
             filter: { campus, year },
-            // Frontend mengharapkan 'device_emissions'
-            device_emissions: emissionsByDeviceName, // Kirim total kWh per nama device
+            device_emissions: emissionsByDeviceName,
         });
 
     } catch (err) {
