@@ -312,17 +312,41 @@ app.get("/emissions/building", async (req, res) => {
     let { campus = "All", year = "All" } = req.query;
 
     try {
-        let query = supabase.from("aggregated_emissions_by_building_and_room").select("*");
+        const pageSize = 1000;
+        let from = 0;
+        let to = pageSize - 1;
+        let done = false;
+        let allData = [];
 
-        if (campus !== "All") query = query.eq("campus_name", campus);
-        if (year !== "All") query = query.eq("year", parseInt(year));
+        // Loop to paginate through the Supabase view
+        while (!done) {
+            let query = supabase
+                .from("aggregated_emissions_by_building_and_room")
+                .select("*")
+                .range(from, to);
 
-        const { data, error } = await query;
-        if (error) throw new Error(error.message);
+            if (campus !== "All") query = query.eq("campus_name", campus);
+            if (year !== "All") query = query.eq("year", parseInt(year));
 
+            const { data, error } = await query;
+
+            if (error) throw new Error(error.message);
+            if (!data || data.length === 0) break;
+
+            allData = allData.concat(data);
+
+            if (data.length < pageSize) {
+                done = true;
+            } else {
+                from += pageSize;
+                to += pageSize;
+            }
+        }
+
+        // Process the aggregated data
         let emissionsByBuilding = {}; // { buildingName: { total_emission, rooms: { roomName: emission } } }
 
-        data.forEach(row => {
+        allData.forEach(row => {
             const { building_name, room_name, emission } = row;
             if (!building_name || !room_name || emission == null) {
                 console.warn("Skipping incomplete data:", row);
@@ -338,7 +362,7 @@ app.get("/emissions/building", async (req, res) => {
                 (emissionsByBuilding[building_name].rooms[room_name] || 0) + emission;
         });
 
-        // Round values
+        // Round results
         for (const building in emissionsByBuilding) {
             emissionsByBuilding[building].total_emission =
                 parseFloat(emissionsByBuilding[building].total_emission.toFixed(3));
@@ -358,6 +382,7 @@ app.get("/emissions/building", async (req, res) => {
         res.status(500).json({ error: err.message || "Server error" });
     }
 });
+
 
 
 app.get("/emissions/device", async (req, res) => {
