@@ -606,26 +606,39 @@ app.get("/rooms", async (req, res) => {
 
 
 app.get("/devices", async (req, res) => {
-    const { room_name } = req.query;
+    const { room_name, building_name } = req.query;
 
-    if (!room_name) {
-        return res.status(400).json({ error: "room_name is required." });
+    if (!room_name || !building_name) {
+        return res.status(400).json({ error: "Both room_name and building_name are required." });
     }
 
     try {
-        // 1. Cari room_id berdasarkan room_name
+        // 1. Cari building_id berdasarkan building_name
+        const { data: buildingData, error: buildingError } = await supabase
+            .from("Buildings")
+            .select("building_id")
+            .eq("building_name", building_name)
+            .maybeSingle();
+
+        if (buildingError) throw new Error(`Finding building: ${buildingError.message}`);
+        if (!buildingData) {
+            return res.status(404).json({ error: "Building not found." });
+        }
+
+        // 2. Cari room_id berdasarkan room_name dan building_id
         const { data: roomData, error: roomError } = await supabase
             .from("Rooms")
             .select("room_id")
             .eq("room_name", room_name)
+            .eq("building_id", buildingData.building_id)
             .maybeSingle();
 
         if (roomError) throw new Error(`Finding room: ${roomError.message}`);
         if (!roomData) {
-            return res.status(404).json({ error: "Room not found." });
+            return res.status(404).json({ error: "Room not found in the specified building." });
         }
 
-        // 2. Ambil semua devices yang berada di ruangan tersebut
+        // 3. Ambil semua devices yang berada di ruangan tersebut
         const { data: devices, error: devicesError } = await supabase
             .from("Devices")
             .select("device_id, device_name, device_power")
@@ -634,15 +647,17 @@ app.get("/devices", async (req, res) => {
         if (devicesError) throw new Error(`Fetching devices: ${devicesError.message}`);
 
         res.json({
+            building_name,
             room_name,
             devices,
         });
 
     } catch (err) {
-        console.error("Error fetching devices by room:", err.message);
+        console.error("Error fetching devices by room and building:", err.message);
         res.status(500).json({ error: err.message || "Internal Server Error" });
     }
 });
+
 
 
 // input device
