@@ -774,51 +774,6 @@ app.delete("/devices/:device_id", async (req, res) => {
 });
 
 
-
-
-
-// Device Table
-app.get("/emissions/device/raw", async (req, res) => {
-    let { campus = "All", year = "All" } = req.query;
-  
-    try {
-      const pageSize = 1000;
-      let page = 0;
-      let allData = [];
-      let more = true;
-  
-      while (more) {
-        let query = supabase
-          .from("device_emissions_view")
-          .select("*")
-          .range(page * pageSize, (page + 1) * pageSize - 1);
-  
-        if (campus !== "All") query = query.ilike("campus_name", campus);
-        if (year !== "All") query = query.eq("year", parseInt(year));
-  
-        const { data, error } = await query;
-  
-        if (error) {
-          console.error("Supabase error:", error.message);
-          return res.status(500).json({ error: error.message });
-        }
-  
-        allData = allData.concat(data);
-        if (data.length < pageSize) more = false;
-        else page++;
-      }
-  
-      res.json({
-        filter: { campus, year },
-        raw_device_data: allData,
-      });
-  
-    } catch (err) {
-      console.error("Server error:", err.message);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
