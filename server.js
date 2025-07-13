@@ -114,134 +114,86 @@ app.post("/users/forgot-password", async (req, res) => {
 
 // ✅ Tambah perangkat lengkap dengan kampus, gedung, ruangan, dan penggunaan bulanan
 app.post("/emissions/device_input", async (req, res) => { // Path diubah sesuai frontend
-    const {
-        device_name,
-        device_power,
-        campus_name,
-        building_name,
-        room_name,
-        usage_hours,
-        year,
-        month,
-    } = req.body;
+  const {
+    device_id,
+    device_name,
+    device_power,
+    campus_name,
+    building_name,
+    room_name,
+    usage_hours,
+    year,
+    month,
+  } = req.body;
 
-    // Validasi input dasar
-    if (!device_name || !device_power || !campus_name || !building_name || !room_name || usage_hours == null || !year || !month) {
-        return res.status(400).json({ error: "Missing required fields." });
+  // Basic validation
+  if (
+    !device_name ||
+    !device_power ||
+    !campus_name ||
+    !building_name ||
+    !room_name ||
+    usage_hours == null ||
+    !year ||
+    !month
+  ) {
+    return res.status(400).json({ error: 'Missing required fields.' });
+  }
+
+  if (isNaN(+device_power) || +device_power <= 0) {
+    return res.status(400).json({ error: 'device_power must be a positive number.' });
+  }
+
+  if (isNaN(+usage_hours) || +usage_hours < 0) {
+    return res.status(400).json({ error: 'usage_hours must be a non-negative number.' });
+  }
+
+  if (isNaN(+year) || isNaN(+month) || +month < 1 || +month > 12) {
+    return res.status(400).json({ error: 'Invalid year or month.' });
+  }
+
+  try {
+    // Check if data already exists
+    const { data: existingData, error: checkError } = await supabase
+      .from('Device_usage')
+      .select('id')
+      .eq('device_id', device_id)
+      .eq('year', +year)
+      .eq('month', +month)
+      .maybeSingle();
+
+    if (checkError) throw new Error(`Checking existing data: ${checkError.message}`);
+
+    if (existingData) {
+      return res.status(409).json({
+        error: 'Data untuk device tersebut pada bulan dan tahun yang sama sudah ada.',
+      });
     }
-    if (isNaN(parseInt(device_power)) || parseInt(device_power) <= 0) {
-        return res.status(400).json({ error: "device_power must be a positive number." });
-    }
-     if (isNaN(parseInt(usage_hours)) || parseInt(usage_hours) < 0) {
-        return res.status(400).json({ error: "usage_hours must be a non-negative number." });
-    }
-     if (isNaN(parseInt(year)) || isNaN(parseInt(month)) || month < 1 || month > 12) {
-        return res.status(400).json({ error: "Invalid year or month." });
-    }
 
+    // Insert new data
+    const { data: usageData, error: usageError } = await supabase
+      .from('Device_usage')
+      .insert([
+        {
+          device_id,
+          usage_hours: +usage_hours,
+          year: +year,
+          month: +month,
+        },
+      ])
+      .select()
+      .single();
 
-    try {
-        // 1. Cari atau buat Kampus
-        let { data: campusData, error: campusError } = await supabase
-            .from("Campuses") // <-- Nama tabel kapital
-            .select("campus_id")
-            .eq("campus_name", campus_name)
-            .maybeSingle();
+    if (usageError) throw new Error(`Inserting device usage: ${usageError.message}`);
 
-        if (campusError) throw new Error(`Finding campus: ${campusError.message}`);
-
-        if (!campusData) {
-            console.log(`Campus "${campus_name}" not found, creating...`);
-            const { data: newCampus, error: insertCampusError } = await supabase
-                .from("Campuses") // <-- Nama tabel kapital
-                .insert([{ campus_name }])
-                .select("campus_id")
-                .single();
-            if (insertCampusError) throw new Error(`Creating campus: ${insertCampusError.message}`);
-            campusData = newCampus;
-            console.log(`Campus created with ID: ${campusData.campus_id}`);
-        }
-
-        // 2. Cari atau buat Gedung
-        let { data: buildingData, error: buildingError } = await supabase
-            .from("Buildings") // <-- Nama tabel kapital
-            .select("building_id")
-            .eq("building_name", building_name)
-            .eq("campus_id", campusData.campus_id) // Pastikan gedung ada di kampus yg benar
-            .maybeSingle();
-
-        if (buildingError) throw new Error(`Finding building: ${buildingError.message}`);
-
-        if (!buildingData) {
-             console.log(`Building "${building_name}" in campus ID ${campusData.campus_id} not found, creating...`);
-            const { data: newBuilding, error: insertBuildingError } = await supabase
-                .from("Buildings") // <-- Nama tabel kapital
-                .insert([{ building_name, campus_id: campusData.campus_id }])
-                .select("building_id")
-                .single();
-            if (insertBuildingError) throw new Error(`Creating building: ${insertBuildingError.message}`);
-            buildingData = newBuilding;
-             console.log(`Building created with ID: ${buildingData.building_id}`);
-        }
-
-        // 3. Cari atau buat Ruangan
-        let { data: roomData, error: roomError } = await supabase
-            .from("Rooms") // <-- Nama tabel kapital
-            .select("room_id")
-            .eq("room_name", room_name)
-            .eq("building_id", buildingData.building_id) // Pastikan ruangan ada di gedung yg benar
-            .maybeSingle();
-
-        if (roomError) throw new Error(`Finding room: ${roomError.message}`);
-
-        if (!roomData) {
-             console.log(`Room "${room_name}" in building ID ${buildingData.building_id} not found, creating...`);
-            const { data: newRoom, error: insertRoomError } = await supabase
-                .from("Rooms") // <-- Nama tabel kapital
-                .insert([{ room_name, building_id: buildingData.building_id }])
-                .select("room_id")
-                .single();
-            if (insertRoomError) throw new Error(`Creating room: ${insertRoomError.message}`);
-            roomData = newRoom;
-             console.log(`Room created with ID: ${roomData.room_id}`);
-        }
-
-        // 4. Masukkan Perangkat (Device)
-        // Diasumsikan setiap input adalah device baru, jika perlu cek duplikat, tambahkan logika di sini
-        const { data: deviceData, error: deviceError } = await supabase
-            .from("Devices") // <-- Nama tabel kapital
-            .insert([{ device_name, device_power: parseInt(device_power), room_id: roomData.room_id }])
-            .select("device_id, device_name") // Select ID dan nama untuk response
-            .single();
-        if (deviceError) throw new Error(`Inserting device: ${deviceError.message}`);
-        console.log(`Device "${deviceData.device_name}" inserted with ID: ${deviceData.device_id}`);
-
-        // 5. Masukkan Data Penggunaan (Device_usage)
-        // Perlu penanganan jika sudah ada data usage untuk device, bulan, tahun yg sama (update atau error?)
-        // Saat ini: selalu insert baru
-        const { data: usageData, error: usageError } = await supabase
-            .from("Device_usage") // <-- Nama tabel sesuai gambar
-            .insert([{
-                device_id: deviceData.device_id,
-                usage_hours: parseInt(usage_hours),
-                year: parseInt(year),
-                month: parseInt(month)
-            }])
-            .select()
-            .single();
-        if (usageError) throw new Error(`Inserting device usage: ${usageError.message}`);
-        console.log(`Device usage inserted for device ID ${deviceData.device_id}, ${month}/${year}`);
-
-        res.status(201).json({
-            message: "✅ Device and usage data saved successfully!",
-            device: deviceData, // Kembalikan info device yg baru dibuat
-            usage: usageData,   // Kembalikan info usage yg baru dibuat
-        });
-    } catch (err) {
-        console.error("❌ Error processing device input:", err.message);
-        // Kembalikan pesan error yang lebih spesifik jika memungkinkan
-        res.status(500).json({ error: `Failed to save data: ${err.message}` });
-    }
+    res.status(201).json({
+      message: '✅ Device and usage data saved successfully!',
+      usage: usageData,
+    });
+  } catch (err) {
+    console.error('❌ Error processing device input:', err.message);
+    res.status(500).json({ error: `Failed to save data: ${err.message}` });
+  }
 });
 
 app.get("/emissions/device_usage", async (req, res) => {
