@@ -197,7 +197,7 @@ app.post("/device-usages", authenticateUser, async (req, res) => { // Path diuba
     // Check if data already exists
     const { data: existingData, error: checkError } = await supabase
       .from('Device_usage')
-      .select('id')
+      .select('usage_id')
       .eq('device_id', device_id)
       .eq('year', +year)
       .eq('month', +month)
