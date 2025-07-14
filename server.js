@@ -3,6 +3,47 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
+const jwt = require('jsonwebtoken'); // Perlu dipasang: npm install jsonwebtoken
+
+
+async function authenticateUser(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: No token provided' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    // 1. Cek ke Supabase apakah token valid
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) {
+      console.warn('🔒 Invalid token:', error?.message);
+      return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    }
+
+    // 2. Decode token & cek expiry time secara manual (opsional tapi disarankan)
+    const decoded = jwt.decode(token);
+    if (!decoded || !decoded.exp) {
+      return res.status(401).json({ error: 'Unauthorized: Token malformed' });
+    }
+
+    const now = Math.floor(Date.now() / 1000); // Waktu sekarang (dalam detik)
+    if (decoded.exp < now) {
+      console.warn('🔒 Token expired at', new Date(decoded.exp * 1000).toISOString());
+      return res.status(401).json({ error: 'Unauthorized: Token expired' });
+    }
+
+    req.user = data.user; // user info bisa digunakan di handler
+    next();
+  } catch (err) {
+    console.error('❌ Error during auth middleware:', err);
+    return res.status(500).json({ error: 'Internal Server Error during authentication' });
+  }
+}
+
+
 
 const app = express();
 const PORT = process.env.PORT || 5000; // Gunakan PORT dari env jika ada
@@ -113,7 +154,7 @@ app.post("/users/forgot-password", async (req, res) => {
 
 
 // ✅ Tambah perangkat lengkap dengan kampus, gedung, ruangan, dan penggunaan bulanan
-app.post("/emissions/device_input", async (req, res) => { // Path diubah sesuai frontend
+app.post("/device-usages", authenticateUser, async (req, res) => { // Path diubah sesuai frontend
   const {
     device_id,
     device_name,
@@ -196,7 +237,7 @@ app.post("/emissions/device_input", async (req, res) => { // Path diubah sesuai 
   }
 });
 
-app.get("/emissions/device_usage", async (req, res) => {
+app.get("/device-usages", async (req, res) => {
     const { device_id } = req.query;
 
     // Validasi input
@@ -225,7 +266,7 @@ app.get("/emissions/device_usage", async (req, res) => {
 });
 
 
-app.put("/emissions/device_usage/update", async (req, res) => {
+app.put("/device-usages", authenticateUser, async (req, res) => {
     const { usage_id, device_id, year, month, usage_hours } = req.body;
 
     // Validasi input
@@ -266,7 +307,7 @@ app.put("/emissions/device_usage/update", async (req, res) => {
     }
 });
 
-app.delete("/emissions/device_usage/delete", async (req, res) => {
+app.delete("/device-usages", authenticateUser, async (req, res) => {
     const { usage_id } = req.body;
 
     // Validasi input
@@ -613,7 +654,7 @@ app.get("/devices", async (req, res) => {
 
 
 // input device
-app.post("/devices/add", async (req, res) => {
+app.post("/devices", authenticateUser, async (req, res) => {
     const { device_name, device_power, room_id } = req.body;
 
     // Validasi input
@@ -648,7 +689,7 @@ app.post("/devices/add", async (req, res) => {
 });
 
 // update device
-app.put("/devices/:device_id", async (req, res) => {
+app.put("/devices/:device_id", authenticateUser, async (req, res) => {
     const device_id = parseInt(req.params.device_id);
     const { device_name, device_power, room_id } = req.body;
 
@@ -690,7 +731,7 @@ app.put("/devices/:device_id", async (req, res) => {
     }
 });
 
-app.delete("/devices/:device_id", async (req, res) => {
+app.delete("/devices/:device_id", authenticateUser, async (req, res) => {
     const { device_id } = req.params;
 
     if (!device_id) {
