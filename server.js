@@ -54,7 +54,7 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
     console.error("❌ Error: SUPABASE_URL and SUPABASE_KEY must be defined in your .env file");
     process.exit(1); // Hentikan server jika kunci Supabase tidak ada
 }
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 app.use(cors()); // Aktifkan CORS untuk semua origin (sesuaikan jika perlu untuk produksi)
 app.use(express.json()); // Middleware untuk parsing body JSON
@@ -62,45 +62,51 @@ app.use(express.json()); // Middleware untuk parsing body JSON
 
 // Register
 app.post("/users/register", async (req, res) => {
-    const { username, password } = req.body;
+  const { username, password } = req.body;
 
-    if (!username || !password) {
-        return res.status(400).json({ error: "Username and password are required." });
+  if (!username || !password) {
+    return res.status(400).json({ error: "Email and password are required." });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters." });
+  }
+
+  try {
+    // Step 1: Check if email already registered
+    const { data: users, error: listError } = await supabase.auth.admin.listUsers();
+
+    if (listError) {
+      console.error("List Users Error:", listError.message);
+      return res.status(500).json({ error: "Failed to check existing users." });
     }
 
-    if (password.length < 6) {
-        return res.status(400).json({ error: "Password must be at least 6 characters." });
+    const userExists = users.users.find((u) => u.email === username);
+    if (userExists) {
+      return res.status(400).json({ error: "Email already in use. Please login instead." });
     }
 
-    try {
-        // Cek apakah email sudah ada (menggunakan listUsers karena signUp tidak selalu memberitahu jika user sudah ada)
-        const { data: existingUsers, error: listError } = await supabase.auth.admin.listUsers({ page: 1, perPage: 100 });
-        if (listError) {
-            console.error("Supabase listUsers error:", listError.message);
-            // Jangan ekspos detail error ke user
-            return res.status(500).json({ error: "Failed to verify user existence." });
-        }
+    // Step 2: Proceed to register
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      username,
+      password,
+    });
 
-        const userExists = existingUsers?.users.some((u) => u.email === username);
-        if (userExists) {
-            return res.status(400).json({ error: "Email already in use. Please login instead." });
-        }
-
-        // Daftarkan user baru
-        const { data: userData, error: signUpError } = await supabase.auth.signUp({ email: username, password });
-        if (signUpError) {
-            console.error("Supabase signUp error:", signUpError.message);
-            return res.status(400).json({ error: signUpError.message }); // Kembalikan pesan error Supabase
-        }
-
-        // Hindari mengirim kembali semua data user, terutama jika ada info sensitif
-        res.status(201).json({ message: "Registration successful. Please check your email for verification." });
-
-    } catch (err) {
-        console.error("Registration error:", err);
-        res.status(500).json({ error: "An unexpected error occurred during registration." });
+    if (signUpError) {
+      console.error("Sign Up Error:", signUpError.message);
+      return res.status(400).json({ error: signUpError.message });
     }
+
+    return res.status(201).json({
+      message: "Registration successful. Please check your email for verification.",
+    });
+
+  } catch (err) {
+    console.error("Unexpected Error:", err);
+    return res.status(500).json({ error: "Unexpected server error." });
+  }
 });
+
 
 // Login
 app.post("/users/login", async (req, res) => {
