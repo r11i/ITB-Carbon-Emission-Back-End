@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
 const jwt = require('jsonwebtoken'); // Perlu dipasang: npm install jsonwebtoken
+const ADMIN_EMAIL = "carbonemissionsdashboarda@gmail.com"
 
 
 async function authenticateUser(req, res, next) {
@@ -35,6 +36,13 @@ async function authenticateUser(req, res, next) {
       return res.status(401).json({ error: 'Unauthorized: Token expired' });
     }
 
+    if (req.path === "/users/register") {
+      const allowedEmail = ADMIN_EMAIL;
+      if (data.user.email !== allowedEmail) {
+        return res.status(403).json({ error: "Forbidden: You are not allowed to register users" });
+      }
+    }
+
     req.user = data.user; // user info bisa digunakan di handler
     next();
   } catch (err) {
@@ -61,7 +69,7 @@ app.use(express.json()); // Middleware untuk parsing body JSON
 
 
 // Register
-app.post("/users/register", async (req, res) => {
+app.post("/users/register", authenticateUser, async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
