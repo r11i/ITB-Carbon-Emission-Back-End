@@ -4,7 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
 const jwt = require('jsonwebtoken'); // Perlu dipasang: npm install jsonwebtoken
-const ADMIN_EMAIL = "carbonemissionsdashboarda@gmail.com"
+const ADMIN_EMAIL = "carbonemissiondashboarda@gmail.com"
 
 
 async function authenticateUser(req, res, next) {
@@ -96,7 +96,7 @@ app.post("/users/register", authenticateUser, async (req, res) => {
 
     // Step 2: Proceed to register
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-      username,
+      email: username,
       password,
     });
 
@@ -167,36 +167,29 @@ app.post("/users/forgot-password", async (req, res) => {
 });
 
 
-// ✅ Tambah perangkat lengkap dengan kampus, gedung, ruangan, dan penggunaan bulanan
-app.post("/device-usages", authenticateUser, async (req, res) => { // Path diubah sesuai frontend
+
+app.post("/device-usages", authenticateUser, async (req, res) => {
   const {
     device_id,
-    device_name,
-    device_power,
-    campus_name,
-    building_name,
-    room_name,
     usage_hours,
     year,
     month,
+    day // 🆕 Tambahkan day dari req.body
   } = req.body;
 
   // Basic validation
   if (
-    !device_name ||
-    !device_power ||
-    !campus_name ||
-    !building_name ||
-    !room_name ||
+    !device_id ||
     usage_hours == null ||
     !year ||
-    !month
+    !month ||
+    !day // 🆕 Validasi field day
   ) {
     return res.status(400).json({ error: 'Missing required fields.' });
   }
 
-  if (isNaN(+device_power) || +device_power <= 0) {
-    return res.status(400).json({ error: 'device_power must be a positive number.' });
+  if (isNaN(+device_id)) {
+    return res.status(400).json({ error: 'device_id must be a number.' });
   }
 
   if (isNaN(+usage_hours) || +usage_hours < 0) {
@@ -207,25 +200,30 @@ app.post("/device-usages", authenticateUser, async (req, res) => { // Path diuba
     return res.status(400).json({ error: 'Invalid year or month.' });
   }
 
+  if (isNaN(+day) || +day < 1 || +day > 31) {
+    return res.status(400).json({ error: 'Invalid day.' });
+  }
+
   try {
-    // Check if data already exists
+    // Cek apakah data sudah ada
     const { data: existingData, error: checkError } = await supabase
       .from('Device_usage')
       .select('usage_id')
       .eq('device_id', device_id)
       .eq('year', +year)
       .eq('month', +month)
+      .eq('day', +day) // 🆕 Cek juga day
       .maybeSingle();
 
     if (checkError) throw new Error(`Checking existing data: ${checkError.message}`);
 
     if (existingData) {
       return res.status(409).json({
-        error: 'Data untuk device tersebut pada bulan dan tahun yang sama sudah ada.',
+        error: 'Data untuk device tersebut pada tanggal yang sama sudah ada.',
       });
     }
 
-    // Insert new data
+    // Insert data
     const { data: usageData, error: usageError } = await supabase
       .from('Device_usage')
       .insert([
@@ -234,6 +232,7 @@ app.post("/device-usages", authenticateUser, async (req, res) => { // Path diuba
           usage_hours: +usage_hours,
           year: +year,
           month: +month,
+          day: +day // 🆕 Masukkan day
         },
       ])
       .select()
@@ -250,6 +249,7 @@ app.post("/device-usages", authenticateUser, async (req, res) => { // Path diuba
     res.status(500).json({ error: `Failed to save data: ${err.message}` });
   }
 });
+
 
 app.get("/device-usages", async (req, res) => {
     const { device_id } = req.query;
@@ -712,6 +712,10 @@ app.put("/devices/:device_id", authenticateUser, async (req, res) => {
         return res.status(400).json({ error: "All fields are required." });
     }
 
+    if (isNaN(device_power) || device_power <= 0) {
+        return res.status(400).json({ error: "device_power must be a positive number." });
+    }
+
     try {
         // Update hanya data dengan device_id yang cocok
         const { data, error } = await supabase
@@ -747,10 +751,6 @@ app.put("/devices/:device_id", authenticateUser, async (req, res) => {
 
 app.delete("/devices/:device_id", authenticateUser, async (req, res) => {
     const { device_id } = req.params;
-
-    if (!device_id) {
-        return res.status(400).json({ error: "Device ID is required." });
-    }
 
     try {
         // Cek apakah device ada
