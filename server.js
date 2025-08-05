@@ -322,7 +322,7 @@ app.put("/device-usages", authenticateUser, async (req, res) => {
 });
 
 app.delete("/device-usages/:usage_id", authenticateUser, async (req, res) => {
-    const usage_id = parseInt(req.params.usage_id);
+    const usage_id = req.params.usage_id;
 
     // Validasi input
     if (!usage_id) {
