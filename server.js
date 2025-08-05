@@ -281,7 +281,7 @@ app.get("/device-usages", async (req, res) => {
 
 
 app.put("/device-usages", authenticateUser, async (req, res) => {
-    const { usage_id, day, device_id, year, month, usage_hours } = req.body;
+    const { usage_id, device_id, year, month, usage_hours } = req.body;
 
     // Validasi input
     if (!usage_id || !device_id || !year || !month || usage_hours == null) {
@@ -321,13 +321,19 @@ app.put("/device-usages", authenticateUser, async (req, res) => {
     }
 });
 
-app.delete("/device-usages", authenticateUser, async (req, res) => {
-    const { usage_id } = req.body;
+app.delete("/device-usages/:usage_id", authenticateUser, async (req, res) => {
+    const usage_id = parseInt(req.params.usage_id);
 
     // Validasi input
     if (!usage_id) {
         return res.status(400).json({ error: "usage_id is required." });
     }
+
+    // Validasi input
+    if (isNaN(usage_id)) {
+        return res.status(400).json({ error: "Valid usage_id is required in the URL." });
+    }
+
 
     try {
         const { data, error } = await supabase
@@ -703,12 +709,11 @@ app.post("/devices", authenticateUser, async (req, res) => {
 });
 
 // update device
-app.put("/devices/:device_id", authenticateUser, async (req, res) => {
-    const device_id = parseInt(req.params.device_id);
-    const { device_name, device_power, room_id } = req.body;
+app.put("/devices", authenticateUser, async (req, res) => {
+    const { device_id, device_name, device_power, room_id } = req.body;
 
     // Validasi input
-    if (!device_name || !device_power || !room_id) {
+    if (!device_id || !device_name || !device_power || !room_id) {
         return res.status(400).json({ error: "All fields are required." });
     }
 
