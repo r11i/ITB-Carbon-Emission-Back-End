@@ -281,7 +281,7 @@ app.get("/device-usages", async (req, res) => {
 
 
 app.put("/device-usages", authenticateUser, async (req, res) => {
-    const { usage_id, device_id, year, month, usage_hours } = req.body;
+    const { usage_id, day, device_id, year, month, usage_hours } = req.body;
 
     // Validasi input
     if (!usage_id || !device_id || !year || !month || usage_hours == null) {
